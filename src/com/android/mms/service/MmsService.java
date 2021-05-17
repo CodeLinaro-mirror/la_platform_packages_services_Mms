@@ -47,6 +47,7 @@ import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.telephony.data.ApnSetting;
 import android.text.TextUtils;
+import android.util.EventLog;
 import android.util.SparseArray;
 
 import com.android.internal.telephony.IMms;
@@ -427,6 +428,10 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
         public boolean archiveStoredConversation(String callingPkg, long conversationId,
                 boolean archived) throws RemoteException {
             LogUtil.d("archiveStoredConversation " + conversationId + " " + archived);
+            if (Binder.getCallingUid() != Process.SYSTEM_UID) {
+                EventLog.writeEvent(0x534e4554, "180419673", Binder.getCallingUid(), "");
+            }
+            enforceSystemUid();
             if (conversationId == -1) {
                 LogUtil.e("archiveStoredConversation: invalid thread id");
                 return false;
@@ -485,6 +490,7 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
          * Calls the pending intent with <code>MMS_ERROR_NO_DATA_NETWORK</code>.
          */
         private void sendErrorInPendingIntent(@Nullable PendingIntent intent) {
+            LogUtil.d("sendErrorInPendingIntent - no data network");
             if (intent != null) {
                 try {
                     intent.send(SmsManager.MMS_ERROR_NO_DATA_NETWORK);
@@ -533,6 +539,9 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                     movePendingSimRequestsToRunningSynchronized();
                 }
             } else {
+                LogUtil.d("Add request to running queue."
+                        + " Request subId=" + request.getSubId() + ","
+                        + " current subId=" + mCurrentSubId);
                 addToRunningRequestQueueSynchronized(request);
             }
         }
@@ -573,6 +582,8 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                 } finally {
                     synchronized (MmsService.this) {
                         mRunningRequestCount--;
+                        LogUtil.d("addToRunningRequestQueueSynchronized mRunningRequestCount="
+                                + mRunningRequestCount);
                         if (mRunningRequestCount <= 0) {
                             movePendingSimRequestsToRunningSynchronized();
                         }
@@ -583,7 +594,8 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
     }
 
     private void movePendingSimRequestsToRunningSynchronized() {
-        LogUtil.d("Schedule requests pending on SIM");
+        LogUtil.d("Move pending requests to running queue mPendingSimRequestQueue.size="
+                + mPendingSimRequestQueue.size());
         mCurrentSubId = SubscriptionManager.INVALID_SUBSCRIPTION_ID;
         while (mPendingSimRequestQueue.size() > 0) {
             final MmsRequest request = mPendingSimRequestQueue.peek();
@@ -592,9 +604,15 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                         || mCurrentSubId == request.getSubId()) {
                     // First or subsequent requests with same SIM ID
                     mPendingSimRequestQueue.remove();
+                    LogUtil.d("Move pending request to running queue."
+                            + " Request subId=" + request.getSubId() + ","
+                            + " current subId=" + mCurrentSubId);
                     addToRunningRequestQueueSynchronized(request);
                 } else {
                     // Stop if we see a different SIM ID
+                    LogUtil.d("Pending request not moved to running queue, different subId."
+                            + " Request subId=" + request.getSubId() + ","
+                            + " current subId=" + mCurrentSubId);
                     break;
                 }
             } else {
@@ -1004,6 +1022,7 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
         } catch (Exception e) {
             // Typically a timeout occurred - cancel task
             pendingResult.cancel(true);
+            LogUtil.e("Exception during PDU read", e);
         }
         return 0;
     }
@@ -1049,6 +1068,7 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
         } catch (Exception e) {
             // Typically a timeout occurred - cancel task
             pendingResult.cancel(true);
+            LogUtil.e("Exception during PDU write", e);
         }
         return false;
     }
