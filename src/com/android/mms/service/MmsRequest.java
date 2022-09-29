@@ -27,19 +27,19 @@ import android.os.Bundle;
 import android.service.carrier.CarrierMessagingService;
 import android.service.carrier.CarrierMessagingServiceWrapper.CarrierMessagingCallback;
 import android.telephony.AnomalyReporter;
-import android.telephony.PhoneStateListener;
 import android.telephony.PreciseDataConnectionState;
-import android.telephony.TelephonyCallback;
-import android.telephony.data.ApnSetting;
-import android.telephony.ims.feature.MmTelFeature;
-import android.telephony.ims.ImsMmTelManager;
-import android.telephony.ims.stub.ImsRegistrationImplBase;
 import android.telephony.SmsManager;
+import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
+import android.telephony.data.ApnSetting;
+import android.telephony.ims.ImsMmTelManager;
+import android.telephony.ims.feature.MmTelFeature;
+import android.telephony.ims.stub.ImsRegistrationImplBase;
 
 import com.android.mms.service.exception.ApnException;
 import com.android.mms.service.exception.MmsHttpException;
 import com.android.mms.service.exception.MmsNetworkException;
+import com.android.mms.service.metrics.MmsStats;
 
 import java.util.UUID;
 
@@ -102,6 +102,7 @@ public abstract class MmsRequest {
     protected Context mContext;
     protected long mMessageId;
     protected int mLastConnectionFailure;
+    private MmsStats mMmsStats;
 
     class MonitorTelephonyCallback extends TelephonyCallback implements
             TelephonyCallback.PreciseDataConnectionStateListener {
@@ -122,13 +123,14 @@ public abstract class MmsRequest {
     }
 
     public MmsRequest(RequestManager requestManager, int subId, String creator,
-            Bundle mmsConfig, Context context, long messageId) {
+            Bundle mmsConfig, Context context, long messageId, MmsStats mmsStats) {
         mRequestManager = requestManager;
         mSubId = subId;
         mCreator = creator;
         mMmsConfig = mmsConfig;
         mContext = context;
         mMessageId = messageId;
+        mMmsStats = mmsStats;
     }
 
     public int getSubId() {
@@ -147,6 +149,7 @@ public abstract class MmsRequest {
         int result = SmsManager.MMS_ERROR_UNSPECIFIED;
         int httpStatusCode = 0;
         byte[] response = null;
+        int retryId = 0;
         // TODO: add mms data channel check back to fast fail if no way to send mms,
         // when telephony provides such API.
         if (!prepareForHttpRequest()) { // Prepare request, like reading pdu data from user
@@ -155,7 +158,7 @@ public abstract class MmsRequest {
         } else { // Execute
             long retryDelaySecs = 2;
             // Try multiple times of MMS HTTP request, depending on the error.
-            for (int i = 0; i < RETRY_TIMES; i++) {
+            for (retryId = 0; retryId < RETRY_TIMES; retryId++) {
                 httpStatusCode = 0; // Clear for retry.
                 MonitorTelephonyCallback connectionStateCallback = new MonitorTelephonyCallback();
                 try {
@@ -213,7 +216,8 @@ public abstract class MmsRequest {
                 retryDelaySecs <<= 1;
             }
         }
-        processResult(context, result, response, httpStatusCode, /* handledByCarrierApp= */ false);
+        processResult(context, result, response, httpStatusCode, /* handledByCarrierApp= */ false,
+                retryId);
     }
 
     private void listenToDataConnectionState(MonitorTelephonyCallback connectionStateCallback) {
@@ -241,6 +245,11 @@ public abstract class MmsRequest {
      */
     public void processResult(Context context, int result, byte[] response, int httpStatusCode,
             boolean handledByCarrierApp) {
+        processResult(context, result, response, httpStatusCode, handledByCarrierApp, 0);
+    }
+
+    private void processResult(Context context, int result, byte[] response, int httpStatusCode,
+            boolean handledByCarrierApp, int retryId) {
         final Uri messageUri = persistIfRequired(context, result, response);
 
         final String requestId = this.getRequestId();
@@ -277,6 +286,7 @@ public abstract class MmsRequest {
                 }
                 reportPossibleAnomaly(result, httpStatusCode);
                 pendingIntent.send(context, result, fillIn);
+                mMmsStats.addAtomToStorage(result, retryId, handledByCarrierApp);
             } catch (PendingIntent.CanceledException e) {
                 LogUtil.e(requestId, "Sending pending intent canceled", e);
             }
@@ -299,7 +309,13 @@ public abstract class MmsRequest {
                 String message = "MMS failed";
                 LogUtil.i(this.toString(),
                         message + " with error: " + result + " httpStatus:" + httpStatusCode);
-                AnomalyReporter.reportAnomaly(generateUUID(result, httpStatusCode), message);
+                TelephonyManager telephonyManager =
+                        mContext.getSystemService(TelephonyManager.class)
+                                .createForSubscriptionId(mSubId);
+                AnomalyReporter.reportAnomaly(
+                        generateUUID(result, httpStatusCode),
+                        message,
+                        telephonyManager.getSimCarrierId());
                 break;
             default:
                 break;
