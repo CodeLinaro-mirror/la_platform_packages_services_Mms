@@ -37,6 +37,7 @@ import org.robolectric.shadows.ShadowBinder;
 @RunWith(RobolectricTestRunner.class)
 public final class MmsServiceRoboTest {
     private IMms.Stub binder;
+    private static final int CALLING_USER = 10;
 
     @Before
     public void setUp() {
@@ -55,16 +56,18 @@ public final class MmsServiceRoboTest {
     @Test
     public void testSendMessage_DoesNotThrowIfSystemUid() throws RemoteException {
         ShadowBinder.setCallingUid(Process.SYSTEM_UID);
-        binder.sendMessage(/* subId= */ 0, "callingPkg", Uri.parse("contentUri"),
+        binder.sendMessage(/* subId= */ 0, /* callingUser= */ CALLING_USER,
+                "callingPkg", Uri.parse("contentUri"),
                 "locationUrl", /* configOverrides= */ null, /* sentIntent= */ null,
-                /* messageId= */ 0L);
+                /* messageId= */ 0L, /* attributionTag= */ null);
     }
 
     @Test
     public void testSendMessageThrows_IfNotSystemUid() {
         assertThrows(SecurityException.class,
-                () -> binder.sendMessage(/* subId= */ 0, "callingPkg", Uri.parse("contentUri"),
+                () -> binder.sendMessage(/* subId= */ 0, /* callingUser= */ CALLING_USER,
+                        "callingPkg", Uri.parse("contentUri"),
                         "locationUrl", /* configOverrides= */ null, /* sentIntent= */ null,
-                        /* messageId= */ 0L));
+                        /* messageId= */ 0L, /* attributionTag= */ null));
     }
 }
