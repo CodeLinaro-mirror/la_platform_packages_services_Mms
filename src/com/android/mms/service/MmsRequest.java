@@ -21,6 +21,7 @@ import android.app.Activity;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
@@ -94,9 +95,10 @@ public abstract class MmsRequest {
          * Write pdu to supplied content uri
          * @param contentUri content uri to which bytes should be written
          * @param pdu pdu bytes to write
+         * @param callingUser user id of the calling app
          * @return true in case of success (else false)
          */
-        public boolean writePduToContentUri(final Uri contentUri, final byte[] pdu);
+        boolean writePduToContentUri(Uri contentUri, byte[] pdu, int callingUser);
     }
 
     // The reference to the pending requests manager (i.e. the MmsService)
@@ -430,6 +432,12 @@ public abstract class MmsRequest {
     }
 
     private boolean isImsOnWifi() {
+        PackageManager pm = mContext.getPackageManager();
+        if (pm == null || !pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY_IMS)) {
+            LogUtil.d(this.toString(), "device doesn't support IMS feature");
+            return false;
+        }
+
         ImsMmTelManager imsManager;
         try {
             imsManager = ImsMmTelManager.createForSubscriptionId(mSubId);
