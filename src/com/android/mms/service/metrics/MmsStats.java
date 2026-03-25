@@ -85,19 +85,19 @@ public class MmsStats {
 
     /** Adds incoming or outgoing mms atom to storage. */
     public void addAtomToStorage(int result) {
-        addAtomToStorage(result, 0, false, 0, 0, 0);
+        addAtomToStorage(result, 0, false, 0, 0);
     }
 
     /** Adds incoming or outgoing mms atom to storage. */
     public void addAtomToStorage(int result, int retryId, boolean handledByCarrierApp,
-            long mMessageId, int pduLength, int httpStatusCode) {
+            long mMessageId, int pduLength) {
 
         long identity = Binder.clearCallingIdentity();
         try {
             if (mIsIncomingMms) {
-                onIncomingMms(result, retryId, handledByCarrierApp, pduLength, httpStatusCode);
+                onIncomingMms(result, retryId, handledByCarrierApp, pduLength);
             } else {
-                onOutgoingMms(result, retryId, handledByCarrierApp, pduLength, httpStatusCode);
+                onOutgoingMms(result, retryId, handledByCarrierApp, pduLength);
             }
             if (isInSatelliteModeForCarrierRoaming(mSubId)) {
                 CarrierRoamingSatelliteSessionStats carrierRoamingSatelliteSessionStats =
@@ -111,7 +111,7 @@ public class MmsStats {
 
     /** Creates a new atom when MMS is received. */
     private void onIncomingMms(int result, int retryId, boolean handledByCarrierApp,
-            int pduLength, int httpStatusCode) {
+            int pduLength) {
         IncomingMms incomingMms = IncomingMms.newBuilder()
                 .setRat(getDataNetworkType())
                 .setResult(getIncomingMmsResult(result))
@@ -129,14 +129,13 @@ public class MmsStats {
                 .setIsNbIotNtn(isNbIotNtn(mSubId))
                 .setPduLength(pduLength)
                 .setPlmn(getPlmnValue(mSubId))
-                .setHttpStatusCode(httpStatusCode)
                 .build();
         mPersistMmsAtomsStorage.addIncomingMms(incomingMms);
     }
 
     /** Creates a new atom when MMS is sent. */
     private void onOutgoingMms(int result, int retryId, boolean handledByCarrierApp,
-            int pduLength, int httpStatusCode) {
+            int pduLength) {
         OutgoingMms outgoingMms = OutgoingMms.newBuilder()
                 .setRat(getDataNetworkType())
                 .setResult(getOutgoingMmsResult(result))
@@ -157,7 +156,6 @@ public class MmsStats {
                 .setCallingPackageName(getSanitizedCallingPackageName())
                 .setAppUid(mAppUid)
                 .setPlmn(getPlmnValue(mSubId))
-                .setHttpStatusCode(httpStatusCode)
                 .build();
         mPersistMmsAtomsStorage.addOutgoingMms(outgoingMms);
     }

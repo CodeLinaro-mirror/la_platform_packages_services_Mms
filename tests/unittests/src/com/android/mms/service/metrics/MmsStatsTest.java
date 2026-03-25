@@ -91,7 +91,7 @@ public class MmsStatsTest {
         doReturn(false).when(mSpyMmsStats).isNbIotNtn(anyInt());
         doReturn(false).when(mSpyMmsStats).isInSatelliteModeForCarrierRoaming(anyInt());
         doReturn("").when(mSpyMmsStats).getPlmnValue(anyInt());
-        mSpyMmsStats.addAtomToStorage(Activity.RESULT_OK, 0, false, 0, 10, 0);
+        mSpyMmsStats.addAtomToStorage(Activity.RESULT_OK, 0, false, 0, 10);
 
         ArgumentCaptor<IncomingMms> incomingMmsCaptor = ArgumentCaptor.forClass(IncomingMms.class);
         verify(mPersistMmsAtomsStorage).addIncomingMms(incomingMmsCaptor.capture());
@@ -112,7 +112,6 @@ public class MmsStatsTest {
         assertThat(incomingMms.getIsNbIotNtn()).isEqualTo(false);
         assertThat(incomingMms.getPduLength()).isEqualTo(10);
         assertThat(incomingMms.getPlmn()).isEqualTo("");
-        assertThat(incomingMms.getHttpStatusCode()).isEqualTo(0);
         verifyNoMoreInteractions(mPersistMmsAtomsStorage);
     }
 
@@ -127,7 +126,7 @@ public class MmsStatsTest {
         doReturn(false).when(mSpyMmsStats).isNbIotNtn(anyInt());
         doReturn(false).when(mSpyMmsStats).isInSatelliteModeForCarrierRoaming(anyInt());
         doReturn("").when(mSpyMmsStats).getPlmnValue(anyInt());
-        mSpyMmsStats.addAtomToStorage(result, retryId, handledByCarrierApp, mMessageId, pduLength, 0);
+        mSpyMmsStats.addAtomToStorage(result, retryId, handledByCarrierApp, mMessageId, pduLength);
 
         ArgumentCaptor<OutgoingMms> outgoingMmsCaptor = ArgumentCaptor.forClass(OutgoingMms.class);
         verify(mPersistMmsAtomsStorage).addOutgoingMms(outgoingMmsCaptor.capture());
@@ -157,7 +156,6 @@ public class MmsStatsTest {
         assertTrue(outgoingMms.getCallingPackageName().isEmpty());
         assertThat(outgoingMms.getAppUid()).isEqualTo(10000);
         assertThat(outgoingMms.getPlmn()).isEqualTo("");
-        assertThat(outgoingMms.getHttpStatusCode()).isEqualTo(0);
     }
 
     @Test
@@ -182,7 +180,6 @@ public class MmsStatsTest {
         assertTrue(outgoingMms.getCallingPackageName().isEmpty());
         assertThat(outgoingMms.getAppUid()).isEqualTo(10000);
         assertThat(outgoingMms.getPlmn()).isEqualTo("");
-        assertThat(outgoingMms.getHttpStatusCode()).isEqualTo(0);
     }
 
     @Test
@@ -209,7 +206,6 @@ public class MmsStatsTest {
         assertTrue(outgoingMms.getCallingPackageName().isEmpty());
         assertThat(outgoingMms.getAppUid()).isEqualTo(10000);
         assertThat(outgoingMms.getPlmn()).isEqualTo("");
-        assertThat(outgoingMms.getHttpStatusCode()).isEqualTo(0);
     }
 
     @Test
@@ -236,7 +232,6 @@ public class MmsStatsTest {
         assertTrue(outgoingMms.getCallingPackageName().isEmpty());
         assertThat(outgoingMms.getAppUid()).isEqualTo(10000);
         assertThat(outgoingMms.getPlmn()).isEqualTo("");
-        assertThat(outgoingMms.getHttpStatusCode()).isEqualTo(0);
     }
 
     @Test
