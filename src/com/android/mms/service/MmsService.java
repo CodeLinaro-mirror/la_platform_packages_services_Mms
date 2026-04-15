@@ -64,6 +64,7 @@ import com.google.android.mms.MmsException;
 import com.google.android.mms.pdu.DeliveryInd;
 import com.google.android.mms.pdu.GenericPdu;
 import com.google.android.mms.pdu.NotificationInd;
+import com.google.android.mms.pdu.PduComposer;
 import com.google.android.mms.pdu.PduParser;
 import com.google.android.mms.pdu.PduPersister;
 import com.google.android.mms.pdu.ReadOrigInd;
@@ -226,7 +227,7 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
             if (Flags.messagePromotion()) {
                 Context context = MmsService.this.getApplicationContext();
                 if (MessageUpgradeController.isMessageUpgradeSupportedForPackage(
-                        context, callingUser, callingPkg)) {
+                        context, callingUser, callingPkg, /*shouldLog=*/true)) {
                     Uri messageUri = addMmsToOutbox(contentUri, callingUser, callingPkg);
                     if (messageUri != null) {
                         LogUtil.d("Upgrading MMS via default SMS app.");
@@ -328,7 +329,14 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                 // ENABLE_MMS_DATA_REQUEST_REASON_OUTGOING_MMS is set for only SendReq case, since
                 // AcknowledgeInd and NotifyRespInd are parts of downloading sequence.
                 // TODO: Should consider ReadRecInd(Read Report)?
-                sendSettingsIntentForFailedMms(!isRawPduSendReq(contentUri, callingUser), subId);
+                if (Flags.messagePromotion()) {
+                    boolean isSendReq = isInternalMmsUri(contentUri)
+                            || isRawPduSendReq(contentUri, callingUser);
+                    sendSettingsIntentForFailedMms(!isSendReq, subId);
+                } else {
+                    sendSettingsIntentForFailedMms(
+                            !isRawPduSendReq(contentUri, callingUser), subId);
+                }
 
                 int resultCode = Flags.mmsDisabledError() ? SmsManager.MMS_ERROR_DATA_DISABLED
                         : SmsManager.MMS_ERROR_NO_DATA_NETWORK;
@@ -1155,6 +1163,33 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
         }
         Callable<Integer> copyPduToArray = new Callable<Integer>() {
             public Integer call() {
+                // When the message promotion flag is enabled, mms content is already copied in the
+                // telephony db.
+                if (Flags.messagePromotion()) {
+                    // TODO(b/496588261): Currently we're only copying the mms content into the
+                    // telephony db if the flag is enabled and the default SMS app supports message
+                    // promotion. But we should always copy the mms content if the message
+                    // promotion feature is enabled to avoid handling both the internal and
+                    // external URIs.
+                    if (isInternalMmsUri(contentUri)) {
+                        try {
+                            PduPersister persister = PduPersister.getPduPersister(MmsService.this);
+                            GenericPdu pdu = persister.load(contentUri);
+                            if (pdu != null) {
+                                byte[] serializedPdu = new PduComposer(MmsService.this, pdu).make();
+                                if (serializedPdu != null && serializedPdu.length > 0) {
+                                    int bytesRead = Math.min(serializedPdu.length, pduData.length);
+                                    System.arraycopy(serializedPdu, 0, pduData, 0, bytesRead);
+                                    return bytesRead;
+                                }
+                            }
+                        } catch (Exception e) {
+                            LogUtil.e("Failed to load pdu from database URI", e);
+                        }
+                        return 0;
+                    }
+                }
+
                 ParcelFileDescriptor.AutoCloseInputStream inStream = null;
                 try {
                     ContentResolver cr = MmsService.this.getContentResolver();
@@ -1253,5 +1288,15 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
 
     static String formatCrossStackMessageId(long id) {
         return "{x-message-id:" + id + "}";
+    }
+
+    /**
+     * Checks if the given URI points to the internal MMS database.
+     *
+     * @param uri The URI to check.
+     * @return True if the URI authority is "mms", indicating a database record.
+     */
+    private boolean isInternalMmsUri(Uri uri) {
+        return uri != null && "mms".equals(uri.getAuthority());
     }
 }
