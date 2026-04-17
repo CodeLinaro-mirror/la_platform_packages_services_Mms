@@ -224,23 +224,33 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
             // Check if the message can be promoted by the default SMS app.
             // TODO(b/475776188): Add unit tests for mms upgrade via AMTS.
             if (Flags.messagePromotion()) {
-                MessageUpgradeController controller =
-                        new MessageUpgradeController(MmsService.this);
-                if (controller.isMessageUpgradeSupportedAndNotDma(callingPkg)) {
-                    LogUtil.d("Upgrading MMS via default SMS app.");
-                    controller.upgradeMessage(
-                            contentUri, Runnable::run, (status) -> {
-                                if (status != UPGRADE_STATUS_ACCEPTED) {
-                                    // fallback to standard SMS
-                                    sendMessageWithoutUpgrade(subId, callingUser, callingPkg,
-                                            contentUri, locationUrl,  configOverrides, sentIntent,
-                                            messageId, attributionTag);
-                                } else {
-                                    LogUtil.d("Default SMS app has accepted the message upgrade "
-                                            + "request.");
-                                }
-                            });
-                    return;
+                Context context = MmsService.this.getApplicationContext();
+                if (MessageUpgradeController.isMessageUpgradeSupportedForPackage(
+                        context, callingUser, callingPkg)) {
+                    Uri messageUri = addMmsToOutbox(contentUri, callingUser, callingPkg);
+                    if (messageUri != null) {
+                        LogUtil.d("Upgrading MMS via default SMS app.");
+                        MessageUpgradeController.upgradeMessage(
+                                context, callingUser, messageUri,
+                                Collections.singletonList(sentIntent),
+                                Collections.emptyList(),
+                                Runnable::run, (status) -> {
+                                    if (status != UPGRADE_STATUS_ACCEPTED) {
+                                        // Fallback to standard SMS. Passing messageUri here will
+                                        // ensure that we update the existing entry in the db
+                                        // instead of creating a new one
+                                        sendMessageWithoutUpgrade(subId, callingUser, callingPkg,
+                                                messageUri, locationUrl,  configOverrides,
+                                                sentIntent, messageId, attributionTag);
+                                    } else {
+                                        LogUtil.d("Default SMS app has accepted the message upgrade"
+                                                + " request.");
+                                    }
+                                });
+                        return;
+                    } else {
+                        LogUtil.d("Couldn't persist MMS into telephony, sending without upgrade");
+                    }
                 }
             }
 
@@ -1011,9 +1021,17 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
     }
 
     private Uri addMmsDraft(Uri contentUri, int callingUser, String creator) {
+        return persistMms(contentUri, Telephony.Mms.Draft.CONTENT_URI, callingUser, creator);
+    }
+
+    private Uri addMmsToOutbox(Uri contentUri, int callingUser, String creator) {
+        return persistMms(contentUri, Telephony.Mms.Outbox.CONTENT_URI, callingUser, creator);
+    }
+
+    private Uri persistMms(Uri contentUri, Uri insertUri, int callingUser, String creator) {
         byte[] pduData = readPduFromContentUri(contentUri, MAX_MMS_FILE_SIZE, callingUser);
         if (pduData == null || pduData.length < 1) {
-            LogUtil.e("addMmsDraft: empty PDU");
+            LogUtil.e("persistMms: empty PDU");
             return null;
         }
         // Clear the calling identity and query the database using the phone user id
@@ -1023,22 +1041,22 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
         try {
             final GenericPdu pdu = parsePduForAnyCarrier(pduData);
             if (pdu == null) {
-                LogUtil.e("addMmsDraft: can't parse input PDU");
+                LogUtil.e("persistMms: can't parse input PDU");
                 return null;
             }
             if (!(pdu instanceof SendReq)) {
-                LogUtil.e("addMmsDraft; invalid MMS type: " + pdu.getClass().getCanonicalName());
+                LogUtil.e("persistMms; invalid MMS type: " + pdu.getClass().getCanonicalName());
                 return null;
             }
             final PduPersister persister = PduPersister.getPduPersister(this);
             final Uri uri = persister.persist(
                     pdu,
-                    Telephony.Mms.Draft.CONTENT_URI,
+                    insertUri,
                     true/*createThreadId*/,
                     true/*groupMmsEnabled*/,
                     null/*preOpenedFiles*/);
             if (uri == null) {
-                LogUtil.e("addMmsDraft: failed to persist message");
+                LogUtil.e("persistMms: failed to persist message");
                 return null;
             }
             final ContentValues values = new ContentValues(3);
@@ -1049,13 +1067,13 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
             }
             if (SqliteWrapper.update(this, getContentResolver(), uri, values,
                     null/*where*/, null/*selectionArg*/) != 1) {
-                LogUtil.e("addMmsDraft: failed to update message");
+                LogUtil.e("persistMms: failed to update message");
             }
             return uri;
         } catch (RuntimeException e) {
-            LogUtil.e("addMmsDraft: failed to parse input PDU", e);
+            LogUtil.e("persistMms: failed to parse input PDU", e);
         } catch (MmsException e) {
-            LogUtil.e("addMmsDraft: failed to persist message", e);
+            LogUtil.e("persistMms: failed to persist message", e);
         } finally {
             Binder.restoreCallingIdentity(identity);
         }
@@ -1141,6 +1159,10 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                 try {
                     ContentResolver cr = MmsService.this.getContentResolver();
                     ParcelFileDescriptor pduFd = cr.openFileDescriptor(contentUri, "r");
+                    if (pduFd == null) {
+                        LogUtil.e("Failed to open file descriptor for " + contentUri);
+                        return 0;
+                    }
                     inStream = new ParcelFileDescriptor.AutoCloseInputStream(pduFd);
                     int bytesRead = inStream.read(pduData, 0, pduData.length);
                     if (bytesRead <= 0) {
@@ -1196,6 +1218,10 @@ public class MmsService extends Service implements MmsRequest.RequestManager {
                 try {
                     ContentResolver cr = MmsService.this.getContentResolver();
                     ParcelFileDescriptor pduFd = cr.openFileDescriptor(contentUri, "w");
+                    if (pduFd == null) {
+                        LogUtil.e("Failed to open file descriptor for " + contentUri);
+                        return Boolean.FALSE;
+                    }
                     outStream = new ParcelFileDescriptor.AutoCloseOutputStream(pduFd);
                     outStream.write(pdu);
                     return Boolean.TRUE;
